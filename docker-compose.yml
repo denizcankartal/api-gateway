@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    environment:
+      - RATE_LIMIT_RPM=${RATE_LIMIT_RPM:-100}
+      - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-20}
+      - CB_FAILURE_THRESHOLD=${CB_FAILURE_THRESHOLD:-5}
+      - CB_SUCCESS_THRESHOLD=${CB_SUCCESS_THRESHOLD:-2}
+      - CB_TIMEOUT=${CB_TIMEOUT:-30}
+      - CB_WINDOW=${CB_WINDOW:-60}
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/lua:/etc/nginx/lua:ro
+      - ./logs:/var/log/nginx
+      # - ./certs:/etc/nginx/certs:ro
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - market-service
+      - order-service
+      - portfolio-service
+    
+  # Trading Platform Services
+  market-service:
+    image: mendhak/http-https-echo:31
+    container_name: market-service
+    environment:
+      - HTTP_PORT=8080
+    networks:
+      - gateway-network
+
+  market-service-2:
+    image: mendhak/http-https-echo:31
+    container_name: market-service-2
+    environment:
+      - HTTP_PORT=8080
+    networks:
+      - gateway-network
+  
+  order-service:
+    image: mendhak/http-https-echo:31
+    container_name: order-service
+    environment:
+      - HTTP_PORT=8080
+    networks:
+      - gateway-network
+
+  order-service-2:
+    image: mendhak/http-https-echo:31
+    container_name: order-service-2
+    environment:
+      - HTTP_PORT=8080
+    networks:
+      - gateway-network
+  
+  portfolio-service:
+    image: mendhak/http-https-echo:31
+    container_name: portfolio-service
+    environment:
+      - HTTP_PORT=8080
+    networks:
+      - gateway-network
+
+networks:
+  gateway-network:
+    driver: bridge
