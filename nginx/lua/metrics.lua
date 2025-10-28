@@ -3,7 +3,6 @@
 
 local metrics_dict = ngx.shared.metrics
 local circuit_dict = ngx.shared.circuit_breaker
-local rate_limit_dict = ngx.shared.rate_limit
 
 -- Helper to output metric
 local function output_metric(name, type, help, value)
@@ -30,16 +29,21 @@ ngx.header["Content-Type"] = "text/plain; version=0.0.4"
 -- Gateway info
 output_metric("gateway_info", "gauge", "API Gateway information", 1)
 
--- Get all metric keys
+-- Get all metric keys (with error handling)
 local keys = metrics_dict:get_keys(0)
+if not keys then
+    keys = {}
+end
 
 -- Rate limit metrics
 ngx.say("\n# Rate Limiting Metrics")
 for _, key in ipairs(keys) do
     if key:match("^metric:rate_limited:") then
         local route = key:match("^metric:rate_limited:(.+)")
-        local count = metrics_dict:get(key) or 0
-        output_metric_with_labels("gateway_rate_limited_total", {route=route}, count)
+        if route then
+            local count = metrics_dict:get(key) or 0
+            output_metric_with_labels("gateway_rate_limited_total", {route=route}, count)
+        end
     end
 end
 
@@ -64,12 +68,17 @@ end
 -- Circuit breaker states
 ngx.say("\n# Current Circuit States")
 local cb_keys = circuit_dict:get_keys(0)
+if not cb_keys then
+    cb_keys = {}
+end
 for _, key in ipairs(cb_keys) do
     if key:match(":state$") then
         local route = key:match("^cb:(.+):state")
-        local state = circuit_dict:get(key) or "closed"
-        local state_value = (state == "open") and 1 or (state == "half_open") and 0.5 or 0
-        output_metric_with_labels("gateway_circuit_state", {route=route, state=state}, state_value)
+        if route then
+            local state = circuit_dict:get(key) or "closed"
+            local state_value = (state == "open") and 1 or (state == "half_open") and 0.5 or 0
+            output_metric_with_labels("gateway_circuit_state", {route=route, state=state}, state_value)
+        end
     end
 end
 

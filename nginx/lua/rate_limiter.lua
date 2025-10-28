@@ -4,19 +4,26 @@
 local rate_limit_dict = ngx.shared.rate_limit
 local metrics_dict = ngx.shared.metrics
 
--- Configuration
+-- Use global configuration from init.lua
+local rate_limit_cfg = _G.gateway.config.rate_limit
 local config = {
-    rate = tonumber(os.getenv("RATE_LIMIT_RPM")) or 100,  -- requests per minute
-    burst = tonumber(os.getenv("RATE_LIMIT_BURST")) or 20  -- burst capacity
+    enabled = rate_limit_cfg.enabled ~= false,
+    rate = rate_limit_cfg.requests_per_minute,
+    burst = rate_limit_cfg.burst
 }
 
--- Get client identifier
-local function get_client_id()
-    return gateway.get_client_id()
-end
+local TOKEN_TTL = 120
 
 -- Token bucket rate limiter
 local function check_rate_limit(client_id, route)
+    if not config.enabled then
+        return true, config.burst, 0
+    end
+
+    if config.rate <= 0 then
+        return true, config.burst, 0
+    end
+
     local key = "rl:" .. route .. ":" .. client_id
     local rate_per_second = config.rate / 60
     local now = ngx.now()
@@ -39,20 +46,23 @@ local function check_rate_limit(client_id, route)
     -- Check if request can proceed
     if tokens >= 1 then
         tokens = tokens - 1
-        rate_limit_dict:set(key .. ":tokens", tokens)
-        rate_limit_dict:set(key .. ":time", now)
-        return true
+        last_time = now
+        rate_limit_dict:set(key .. ":tokens", tokens, TOKEN_TTL)
+        rate_limit_dict:set(key .. ":time", last_time, TOKEN_TTL)
+        return true, math.floor(tokens), 0
     else
         -- Rate limit exceeded
-        return false, math.ceil((1 - tokens) / rate_per_second)
+        rate_limit_dict:set(key .. ":tokens", tokens, TOKEN_TTL)
+        rate_limit_dict:set(key .. ":time", last_time, TOKEN_TTL)
+        return false, 0, math.ceil((1 - tokens) / rate_per_second)
     end
 end
 
 -- Main execution
-local client_id = get_client_id()
+local client_id = _G.gateway.get_client_id()
 local route = ngx.var.route_name or "unknown"
 
-local allowed, retry_after = check_rate_limit(client_id, route)
+local allowed, remaining, retry_after = check_rate_limit(client_id, route)
 
 if not allowed then
     -- Increment rate limit counter
@@ -73,3 +83,4 @@ end
 
 -- Set rate limit headers for successful requests
 ngx.header["X-RateLimit-Limit"] = config.rate
+ngx.header["X-RateLimit-Remaining"] = tostring(remaining)
