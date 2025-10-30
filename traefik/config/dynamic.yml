@@ -1,0 +1,133 @@
+# Traefik Dynamic Configuration - Combined
+# All routes, services, and middlewares in one file
+
+http:
+  # Routers
+  routers:
+    # Health check endpoint (HTTP only)
+    health-router:
+      rule: "Path(`/health`)"
+      service: market-service
+      entryPoints:
+        - web
+      priority: 100
+
+    # Market Service HTTPS
+    market-router:
+      rule: "PathPrefix(`/api/v1/market`)"
+      service: market-service
+      middlewares:
+        - rate-limit
+        - circuit-breaker
+        - security-headers
+      entryPoints:
+        - websecure
+      tls: {}
+
+    # Orders Service HTTPS
+    orders-router:
+      rule: "PathPrefix(`/api/v1/orders`)"
+      service: order-service
+      middlewares:
+        - rate-limit
+        - circuit-breaker
+        - security-headers
+      entryPoints:
+        - websecure
+      tls: {}
+
+    # Portfolio Service HTTPS
+    portfolio-router:
+      rule: "PathPrefix(`/api/v1/portfolio`)"
+      service: portfolio-service
+      middlewares:
+        - rate-limit
+        - circuit-breaker
+        - security-headers
+      entryPoints:
+        - websecure
+      tls: {}
+
+    # HTTP to HTTPS redirect (catch-all)
+    http-redirect:
+      rule: "PathPrefix(`/`)"
+      service: noop@internal
+      middlewares:
+        - redirect-to-https
+      entryPoints:
+        - web
+      priority: 1
+
+  # Services (Backends)
+  # Traefik automatically load balances across multiple servers
+  # Default algorithm: Round Robin (distributes requests evenly)
+  services:
+    market-service:
+      loadBalancer:
+        servers:
+          - url: "http://market-service:8080"     # Instance 1
+          - url: "http://market-service-2:8080"   # Instance 2
+        # Traefik distributes traffic: Request 1 → Instance 1, Request 2 → Instance 2, etc.
+
+    order-service:
+      loadBalancer:
+        servers:
+          - url: "http://order-service:8080"      # Instance 1
+          - url: "http://order-service-2:8080"    # Instance 2
+
+    portfolio-service:
+      loadBalancer:
+        servers:
+          - url: "http://portfolio-service:8080"  # Single instance (no load balancing needed)
+
+  # Middlewares
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    rate-limit:
+      rateLimit:
+        average: 100  # Requests per period
+        period: 1m    # Time window
+        burst: 20     # Extra requests allowed in burst
+        # sourceCriterion defines how to identify clients for rate limiting
+        # Option 1: By IP address (default if sourceCriterion not specified)
+        # Option 2: By header value - useful for API key-based rate limiting
+        # sourceCriterion:
+        #   requestHeaderName: X-Api-Key  # Rate limit per API key instead of IP
+        #
+        # How it works:
+        # - Client sends: curl -H "X-Api-Key: user-123" https://api.example.com/market
+        # - Each unique X-Api-Key value gets separate rate limit bucket
+        # - If header not present, falls back to IP address
+        #
+        # Use cases:
+        # - IP-based: Good for public APIs, prevents single machine abuse
+        # - Header-based: Good for authenticated APIs, per-user quotas
+
+    circuit-breaker:
+      circuitBreaker:
+        expression: "NetworkErrorRatio() > 0.5 || ResponseCodeRatio(500, 600, 0, 600) > 0.3"
+
+    security-headers:
+      headers:
+        customResponseHeaders:
+          X-Frame-Options: "SAMEORIGIN"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+
+# TLS Configuration
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      cipherSuites:
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+
+  certificates:
+    - certFile: /etc/traefik/certs/server.crt
+      keyFile: /etc/traefik/certs/server.key

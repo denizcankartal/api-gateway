@@ -1,0 +1,126 @@
+# Traefik Dynamic Configuration - Middlewares
+# Equivalent to nginx/lua/*.lua - defines rate limiting, circuit breakers, headers, etc.
+
+http:
+  middlewares:
+    # HTTP to HTTPS redirect
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    # Rate Limiting (equivalent to nginx/lua/rate_limiter.lua)
+    # Token bucket algorithm: 100 requests per minute with burst of 20
+    rate-limit-market:
+      rateLimit:
+        average: 100  # Requests per period
+        period: 1m    # Time period
+        burst: 20     # Burst capacity (like nginx RATE_LIMIT_BURST)
+        sourceCriterion:
+          requestHeaderName: X-Api-Key  # Rate limit by API key
+          # Falls back to IP if header not present
+
+    rate-limit-orders:
+      rateLimit:
+        average: 100
+        period: 1m
+        burst: 20
+        sourceCriterion:
+          requestHeaderName: X-Api-Key
+
+    rate-limit-portfolio:
+      rateLimit:
+        average: 100
+        period: 1m
+        burst: 20
+        sourceCriterion:
+          requestHeaderName: X-Api-Key
+
+    # Circuit Breaker (equivalent to nginx/lua/circuit_breaker*.lua)
+    # Opens circuit after 5 failures, stays open for 30s, requires 2 successes to close
+    circuit-breaker-market:
+      circuitBreaker:
+        expression: "NetworkErrorRatio() > 0.5 || ResponseCodeRatio(500, 600, 0, 600) > 0.3"
+        checkPeriod: 60s  # Equivalent to CB_WINDOW (failure counting window)
+        fallbackDuration: 30s  # Equivalent to CB_TIMEOUT (how long circuit stays open)
+        recoveryDuration: 10s  # Time to stay in half-open state
+
+    circuit-breaker-orders:
+      circuitBreaker:
+        expression: "NetworkErrorRatio() > 0.5 || ResponseCodeRatio(500, 600, 0, 600) > 0.3"
+        checkPeriod: 60s
+        fallbackDuration: 30s
+        recoveryDuration: 10s
+
+    circuit-breaker-portfolio:
+      circuitBreaker:
+        expression: "NetworkErrorRatio() > 0.5 || ResponseCodeRatio(500, 600, 0, 600) > 0.3"
+        checkPeriod: 60s
+        fallbackDuration: 30s
+        recoveryDuration: 10s
+
+    # Security Headers (equivalent to nginx security headers)
+    security-headers:
+      headers:
+        customResponseHeaders:
+          X-Frame-Options: "SAMEORIGIN"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Strict-Transport-Security: "max-age=31536000; includeSubDomains"
+        # Remove server identification
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+
+    # Compression (equivalent to nginx gzip)
+    compression:
+      compress:
+        excludedContentTypes:
+          - "text/event-stream"
+
+    # Retry logic (equivalent to nginx proxy_next_upstream)
+    retry:
+      attempts: 2
+      initialInterval: 100ms
+
+    # Request ID for tracing (equivalent to nginx X-Request-ID)
+    request-id:
+      headers:
+        customRequestHeaders:
+          X-Request-ID: "{{ .RequestID }}"
+
+    # Combined middleware chains for each route
+    market-chain:
+      chain:
+        middlewares:
+          - rate-limit-market
+          - circuit-breaker-market
+          - security-headers
+          - compression
+          - retry
+          - request-id
+
+    orders-chain:
+      chain:
+        middlewares:
+          - rate-limit-orders
+          - circuit-breaker-orders
+          - security-headers
+          - compression
+          - retry
+          - request-id
+
+    portfolio-chain:
+      chain:
+        middlewares:
+          - rate-limit-portfolio
+          - circuit-breaker-portfolio
+          - security-headers
+          - compression
+          - retry
+          - request-id
+
+    # Basic security headers for health endpoint
+    health-headers:
+      headers:
+        customResponseHeaders:
+          X-Content-Type-Options: "nosniff"

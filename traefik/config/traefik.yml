@@ -1,0 +1,91 @@
+# Traefik Static Configuration
+# Equivalent to nginx.conf - defines global settings, entry points, and providers
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: true  # Dashboard on :8080 (for dev - restrict in production)
+
+# Entry Points (ports that Traefik listens on)
+entryPoints:
+  # HTTP entry point (port 80)
+  web:
+    address: ":80"
+    # Note: HTTP->HTTPS redirect is configured in dynamic config with exceptions
+
+  # HTTPS entry point (port 443)
+  websecure:
+    address: ":443"
+    http:
+      # TLS configuration
+      tls:
+        options: default
+        certResolver: ""  # Using manual certificates (not Let's Encrypt)
+    # HTTP/2 is enabled by default in Traefik v3
+
+  # Dashboard and metrics (port 8080)
+  traefik:
+    address: ":8080"
+
+# Providers - where Traefik gets routing configuration
+providers:
+  # File provider for dynamic configuration (routes, middlewares, services)
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true  # Auto-reload on file changes (like nginx -s reload)
+
+# Logging
+log:
+  level: INFO  # DEBUG, INFO, WARN, ERROR
+  format: json  # JSON format like nginx logs
+  filePath: /var/log/traefik/traefik.log
+
+# Access Logs (equivalent to nginx access logs)
+accessLog:
+  format: json
+  filePath: /var/log/traefik/access.log
+  bufferingSize: 100
+  filters:
+    statusCodes:
+      - "200-299"
+      - "300-399"
+      - "400-499"
+      - "500-599"
+  fields:
+    defaultMode: keep
+    names:
+      ClientUsername: drop
+    headers:
+      defaultMode: keep
+      names:
+        # Keep important headers for debugging
+        User-Agent: keep
+        X-Api-Key: keep
+        X-Forwarded-For: keep
+        # Redact sensitive headers
+        Authorization: redact
+        Cookie: drop
+
+# Metrics - Prometheus endpoint (equivalent to nginx/lua/metrics.lua)
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+    entryPoint: traefik  # Exposed on :8080/metrics
+    buckets:
+      - 0.1
+      - 0.3
+      - 1.0
+      - 3.0
+      - 5.0
+
+# Global settings
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# Ping endpoint for health checks
+ping:
+  entryPoint: web
+  manualRouting: true  # We'll define a route for /health in dynamic config

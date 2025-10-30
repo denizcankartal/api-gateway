@@ -1,0 +1,138 @@
+# Traefik Dynamic Configuration - Routes and Services
+# Equivalent to nginx/conf.d/gateway.conf and upstreams.conf
+
+http:
+  # Routers (equivalent to nginx location blocks)
+  routers:
+    # Redirect HTTP to HTTPS (except /health)
+    http-redirect:
+      rule: "PathPrefix(`/`) && !Path(`/health`)"
+      service: noop@internal
+      middlewares:
+        - redirect-to-https
+      entryPoints:
+        - web
+      priority: 1  # Low priority so /health can override
+
+    # Market Service routes
+    market-router:
+      rule: "PathPrefix(`/api/v1/market`)"
+      service: market-service
+      middlewares:
+        - market-chain
+      entryPoints:
+        - websecure
+      tls: {}
+
+    # Orders Service routes
+    orders-router:
+      rule: "PathPrefix(`/api/v1/orders`)"
+      service: order-service
+      middlewares:
+        - orders-chain
+      entryPoints:
+        - websecure
+      tls: {}
+
+    # Portfolio Service routes
+    portfolio-router:
+      rule: "PathPrefix(`/api/v1/portfolio`)"
+      service: portfolio-service
+      middlewares:
+        - portfolio-chain
+      entryPoints:
+        - websecure
+      tls: {}
+
+    # Health check endpoint (HTTP only, no rate limiting)
+    health-router:
+      rule: "Path(`/health`)"
+      service: health-service
+      middlewares:
+        - health-headers
+      entryPoints:
+        - web
+      priority: 100  # Higher priority than HTTP->HTTPS redirect
+
+  # Services (equivalent to nginx upstream blocks)
+  services:
+    # Market Service with load balancing (2 instances)
+    market-service:
+      loadBalancer:
+        # Health checks (equivalent to nginx max_fails/fail_timeout)
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout: 3s
+          headers:
+            Host: market-service
+        # Servers (equivalent to nginx upstream server directives)
+        servers:
+          - url: "http://market-service:8080"
+          - url: "http://market-service-2:8080"
+        # Connection settings (equivalent to nginx keepalive)
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: 100ms
+        # Sticky sessions disabled (stateless)
+        sticky:
+          cookie:
+            name: ""
+
+    # Order Service with load balancing (2 instances)
+    order-service:
+      loadBalancer:
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout: 3s
+          headers:
+            Host: order-service
+        servers:
+          - url: "http://order-service:8080"
+          - url: "http://order-service-2:8080"
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: 100ms
+
+    # Portfolio Service (1 instance)
+    portfolio-service:
+      loadBalancer:
+        healthCheck:
+          path: /health
+          interval: 10s
+          timeout: 3s
+          headers:
+            Host: portfolio-service
+        servers:
+          - url: "http://portfolio-service:8080"
+        passHostHeader: true
+        responseForwarding:
+          flushInterval: 100ms
+
+    # Health check service (simple passthrough to one backend)
+    health-service:
+      loadBalancer:
+        servers:
+          - url: "http://market-service:8080"
+        passHostHeader: true
+
+# TLS Configuration
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12  # TLS 1.2 and 1.3 only
+      cipherSuites:
+        # Modern, secure ciphers with forward secrecy (equivalent to nginx ssl_ciphers)
+        - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+      sniStrict: false
+
+  # TLS Certificates (equivalent to nginx ssl_certificate)
+  certificates:
+    - certFile: /etc/traefik/certs/server.crt
+      keyFile: /etc/traefik/certs/server.key

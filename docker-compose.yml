@@ -1,27 +1,22 @@
 services:
+  # Traefik API Gateway
   gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: traefik:v3.1
     container_name: api-gateway
     ports:
-      - "80:80"
-      - "443:443"
-    env_file:
-      - .env
-    environment:
-      - RATE_LIMIT_RPM=${RATE_LIMIT_RPM:-100}
-      - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-20}
-      - CB_FAILURE_THRESHOLD=${CB_FAILURE_THRESHOLD:-5}
-      - CB_SUCCESS_THRESHOLD=${CB_SUCCESS_THRESHOLD:-2}
-      - CB_TIMEOUT=${CB_TIMEOUT:-30}
-      - CB_WINDOW=${CB_WINDOW:-60}
+      - "80:80"      # HTTP
+      - "443:443"    # HTTPS
+      - "8080:8080"  # Dashboard and metrics
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./nginx/lua:/etc/nginx/lua:ro
-      - ./logs:/var/log/nginx
-      # - ./certs:/etc/nginx/certs:ro
+      # Mount Traefik configuration
+      - ./traefik/config/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/config/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      # Mount TLS certificates
+      - ./traefik/certs:/etc/traefik/certs:ro
+      # Mount logs directory
+      - ./logs:/var/log/traefik
+      # Docker socket for service discovery
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - gateway-network
     restart: unless-stopped
@@ -49,8 +44,16 @@ services:
         condition: service_healthy
       portfolio-service:
         condition: service_healthy
-    
-  # Trading Platform Services
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Backend Services (same as before)
+
+  # Market Service - Instance 1
   market-service:
     image: mendhak/http-https-echo:31
     container_name: market-service
@@ -70,6 +73,7 @@ services:
           cpus: '0.5'
           memory: 128M
 
+  # Market Service - Instance 2
   market-service-2:
     image: mendhak/http-https-echo:31
     container_name: market-service-2
@@ -89,6 +93,7 @@ services:
           cpus: '0.5'
           memory: 128M
 
+  # Order Service - Instance 1
   order-service:
     image: mendhak/http-https-echo:31
     container_name: order-service
@@ -108,6 +113,7 @@ services:
           cpus: '0.5'
           memory: 128M
 
+  # Order Service - Instance 2
   order-service-2:
     image: mendhak/http-https-echo:31
     container_name: order-service-2
@@ -127,6 +133,7 @@ services:
           cpus: '0.5'
           memory: 128M
 
+  # Portfolio Service
   portfolio-service:
     image: mendhak/http-https-echo:31
     container_name: portfolio-service
